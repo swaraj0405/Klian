@@ -1,0 +1,5 @@
+{
+  "name": "KLIAS",
+  "description": "KLIAS is a full-featured social platform that provides authentication, role-based access, social interaction, messaging, user profiles, analytics, and personalized settings. It is designed for students, teachers, and administrators with clearly defined roles and permissions.",
+  "requestFramePermissions": []
+}

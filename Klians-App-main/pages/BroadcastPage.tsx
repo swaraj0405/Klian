@@ -1,0 +1,404 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { MOCK_BROADCASTS } from '../constants';
+import { useAuth } from '../hooks/useAuth';
+import { useSocket } from '../contexts/SocketContext';
+import { Role, Broadcast } from '../types';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
+import { Avatar } from '../components/ui/Avatar';
+import { Modal } from '../components/ui/Modal';
+import { BroadcastCard } from '../components/BroadcastCard';
+import { announcementsAPI } from '../src/api/announcements';
+
+// --- ICONS ---
+const UsersIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m-7.5-2.962c.57-1.023.57-2.308.002-3.332C12.093 8.32 10.343 7.5 8.5 7.5c-1.843 0-3.593.82-4.55 2.206-.568 1.024-.568 2.308 0 3.332a8.958 8.958 0 014.55 2.206zM16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zm-7.5 0a3 3 0 116 0 3 3 0 01-6 0z" />
+    </svg>
+);
+const StudentsIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.905 59.905 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0l-3.07-.812A59.905 59.905 0 0112 3.493a59.905 59.905 0 0110.399 5.84l-3.07.813m0 0a59.905 59.905 0 01-21.8 0z" />
+    </svg>
+);
+const TeachersIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+    </svg>
+);
+const ChevronLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+    </svg>
+);
+
+// --- HELPER COMPONENTS ---
+const AudienceButton: React.FC<{
+    label: string;
+    icon: React.ReactElement<React.SVGProps<SVGSVGElement>>;
+    isActive: boolean;
+    onClick: () => void;
+}> = ({ label, icon, isActive, onClick }) => {
+  const baseClasses = "flex flex-col items-center justify-center gap-1.5 p-3 rounded-lg border-2 transition-all duration-200 w-full";
+  const activeClasses = "bg-red-50 dark:bg-red-900/20 border-red-500 text-red-600 dark:text-red-400 font-semibold shadow-sm";
+  const inactiveClasses = "bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-600 dark:text-slate-400";
+  
+  return (
+        <button onClick={onClick} className={`${baseClasses} ${isActive ? activeClasses : inactiveClasses}`}>
+            {React.cloneElement(icon, { className: "h-5 w-5" })}
+      <span className="text-xs font-medium">{label}</span>
+    </button>
+  );
+};
+
+
+const AudienceBadge: React.FC<{ target: Role | 'All' }> = ({ target }) => {
+  const styles: Record<Role | 'All', string> = {
+    'All': 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300',
+    [Role.STUDENT]: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
+    [Role.TEACHER]: 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300',
+    [Role.ADMIN]: 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300',
+  };
+  const label = target === 'All' ? 'All Users' : target;
+  
+  return (
+    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${styles[target]}`}>
+      {label}
+    </span>
+  );
+};
+
+const BroadcastSkeleton: React.FC = () => (
+    <div className="p-4 mb-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm animate-pulse">
+        <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-10 h-10 bg-slate-200 dark:bg-slate-700 rounded-full" />
+            <div className="flex-1 space-y-3">
+                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-full" />
+                <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-2/3" />
+            </div>
+        </div>
+    </div>
+);
+
+
+const BroadcastHistoryItem: React.FC<{ broadcast: Broadcast; currentUserId?: string; onDelete?: (id: string) => void }> = ({ broadcast, currentUserId, onDelete }) => {
+    const isOwner = Boolean(
+        (broadcast.author as any)?.id === currentUserId ||
+        (broadcast.author as any)?._id === currentUserId
+    );
+
+    const handleDelete = () => {
+        if (onDelete) {
+            onDelete(broadcast.id);
+        }
+    };
+
+    return (
+        <div className="p-4 mb-3 bg-red-50 dark:bg-red-900/20 rounded-xl border-l-4 border-red-500 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-start gap-3">
+                {/* Icon */}
+                <div className="flex-shrink-0 w-10 h-10 bg-red-500 rounded-full flex items-center justify-center">
+                    <UsersIcon className="w-5 h-5 text-white" />
+                </div>
+                
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                    {/* Title */}
+                    <h3 className="font-bold text-slate-900 dark:text-slate-100 truncate">
+                        {broadcast.title}
+                    </h3>
+                    
+                    {/* Description */}
+                    <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 line-clamp-2">
+                        {broadcast.content}
+                    </p>
+                    
+                    {/* Sender & Target */}
+                    <div className="flex items-center justify-between mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center gap-1">
+                            <span className="font-medium">Sent by {broadcast.author.name}</span>
+                            <span>•</span>
+                            <span>{new Date(broadcast.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                        </div>
+                                                <div className="flex items-center gap-2">
+                                                    <AudienceBadge target={broadcast.target} />
+                                                    {isOwner && onDelete && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleDelete}
+                                                            className="px-2 py-1 text-xs font-semibold text-red-600 hover:text-white hover:bg-red-500 rounded-md border border-red-200 transition"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    )}
+                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// --- MAIN PAGE COMPONENT ---
+export const BroadcastPage: React.FC = () => {
+    const { user } = useAuth();
+    const { socket } = useSocket();
+    const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [title, setTitle] = useState('');
+    const [content, setContent] = useState('');
+    const [target, setTarget] = useState<Role | 'All'>('All');
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState('');
+    const navigate = useNavigate();
+
+    // Fetch announcements on mount
+    useEffect(() => {
+        fetchBroadcasts();
+
+        if (socket) {
+            socket.on('announcement-created', (newAnnouncement) => {
+                const newBroadcast: Broadcast = {
+                    id: newAnnouncement._id,
+                    title: newAnnouncement.title,
+                    content: newAnnouncement.content,
+                    author: newAnnouncement.author,
+                    target: newAnnouncement.target,
+                    timestamp: newAnnouncement.createdAt,
+                };
+                setBroadcasts(prev => [newBroadcast, ...prev]);
+            });
+
+            return () => {
+                socket.off('announcement-created');
+            };
+        }
+    }, [socket]);
+
+    const fetchBroadcasts = async () => {
+        try {
+            setLoading(true);
+            const data = await announcementsAPI.getAnnouncements();
+            const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            const broadcastsFromAPI: Broadcast[] = data.map((ann: any) => ({
+                id: ann._id,
+                title: ann.title,
+                content: ann.content,
+                author: ann.author,
+                target: ann.target,
+                timestamp: ann.createdAt,
+            }));
+            const filtered = broadcastsFromAPI
+              .filter(b => new Date(b.timestamp).getTime() >= sevenDaysAgo)
+              .filter(b => (b.author as any)?.id === user?.id || (b.author as any)?._id === user?.id)
+              .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setBroadcasts(filtered);
+        } catch (err) {
+            console.error('Failed to load broadcasts:', err);
+            setError('Failed to load broadcasts');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleBack = () => {
+        if (window.history.state && window.history.state.idx > 0) {
+            navigate(-1);
+        } else {
+            navigate('/home', { replace: true });
+        }
+    };
+    
+    const clearForm = () => {
+        setTitle('');
+        setContent('');
+        setTarget('All');
+        setError('');
+    }
+
+    const mapRoleToTarget = (role: Role | 'All'): string => {
+      if (role === 'All') return 'All';
+      if (role === Role.STUDENT) return 'Student';
+      if (role === Role.TEACHER) return 'Teacher';
+      return 'All';
+    };
+
+    const handleSendBroadcast = async () => {
+        if (!title.trim() || !content.trim() || !user) return;
+        
+        try {
+            setIsSubmitting(true);
+            setError('');
+            
+            // Map frontend role to backend target
+            const backendTarget = mapRoleToTarget(target);
+            
+            // Save to database
+            const newAnnouncement = await announcementsAPI.createAnnouncement({
+                title,
+                content,
+                target: backendTarget
+            });
+            
+            // Create broadcast object for local state
+            const newBroadcast: Broadcast = {
+                id: newAnnouncement._id,
+                title: newAnnouncement.title,
+                content: newAnnouncement.content,
+                author: user,
+                target: target,
+                timestamp: newAnnouncement.createdAt,
+            };
+            
+            // Update local state
+            setBroadcasts([newBroadcast, ...broadcasts]);
+            
+            // Emit socket event
+            if (socket) {
+                socket.emit('new-announcement', newAnnouncement);
+            }
+            
+            clearForm();
+            setIsPreviewOpen(false);
+        } catch (err) {
+            setError('Failed to send broadcast. Please try again.');
+            console.error(err);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDeleteBroadcast = async (announcementId: string) => {
+        try {
+            await announcementsAPI.deleteAnnouncement(announcementId);
+            setBroadcasts(prev => prev.filter(b => b.id !== announcementId));
+        } catch (err) {
+            console.error('Failed to delete broadcast:', err);
+            setError('Failed to delete broadcast.');
+        }
+    };
+    
+    const isFormIncomplete = !title.trim() || !content.trim();
+
+    return (
+        <div className="min-h-screen bg-slate-50 flex justify-center">
+            <div className="w-[94%] max-w-7xl mx-auto pb-8">
+            <div className="flex items-center gap-4 mb-6 px-5 md:px-8 pt-6">
+                <button onClick={handleBack} className="md:hidden p-2 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">
+                    <ChevronLeftIcon className="h-6 w-6" />
+                </button>
+                <h1 className="text-3xl md:text-4xl font-bold text-slate-800 dark:text-slate-100">Broadcast System</h1>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 px-5 md:px-8">
+                {/* --- CREATE BROADCAST --- */}
+                <div className="lg:col-span-2">
+                     <h2 className="text-xl font-bold mb-4 text-slate-800">Create Broadcast</h2>
+                            <Card className="p-6 rounded-2xl shadow-sm border border-slate-200 h-[460px] flex flex-col bg-white">
+                                <div className="space-y-3">
+                            <div>
+                                <label htmlFor="broadcast-title" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">Title</label>
+                                <Input 
+                                    id="broadcast-title"
+                                    value={title} 
+                                    onChange={(e) => setTitle(e.target.value)} 
+                                    placeholder="e.g., Campus Closure Notice"
+                                    disabled={isSubmitting}
+                                    className="text-sm"
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="broadcast-message" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">Message</label>
+                                <textarea
+                                    id="broadcast-message"
+                                    value={content}
+                                    onChange={(e) => setContent(e.target.value)}
+                                    className="w-full p-3.5 text-sm bg-slate-100 dark:bg-slate-700 rounded-lg border border-transparent focus:outline-none focus:ring-2 focus:ring-red-500 resize-none transition placeholder:text-slate-400 disabled:opacity-50"
+                                    rows={3}
+                                    placeholder="Write your announcement here..."
+                                    disabled={isSubmitting}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">Target Audience</label>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    <AudienceButton label="All Users" icon={<UsersIcon />} isActive={target === 'All'} onClick={() => !isSubmitting && setTarget('All')} />
+                                    <AudienceButton label="Students" icon={<StudentsIcon />} isActive={target === Role.STUDENT} onClick={() => !isSubmitting && setTarget(Role.STUDENT)} />
+                                    <AudienceButton label="Teachers" icon={<TeachersIcon />} isActive={target === Role.TEACHER} onClick={() => !isSubmitting && setTarget(Role.TEACHER)} />
+                                </div>
+                            </div>
+                            {error && (
+                                <div className="p-2.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-xs">
+                                    {error}
+                                </div>
+                            )}
+                            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-700 mt-auto">
+                                <Button variant="ghost" onClick={() => setIsPreviewOpen(true)} disabled={isFormIncomplete || isSubmitting} className="text-base font-semibold">Preview</Button>
+                                <Button onClick={handleSendBroadcast} disabled={isFormIncomplete || isSubmitting} className="text-base font-semibold">
+                                    {isSubmitting ? 'Sending...' : 'Send'}
+                                </Button>
+                            </div>
+                        </div>
+                    </Card>
+                </div>
+
+                {/* --- BROADCAST HISTORY --- */}
+                <div className="lg:col-span-3">
+                    <h2 className="text-xl font-bold mb-4 text-slate-800">Broadcast History</h2>
+                                        <Card className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[460px]">
+                                            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                                                    {loading && (
+                                                        <>
+                                                            {[1, 2, 3, 4].map((i) => (
+                                                                <BroadcastSkeleton key={`broadcast-skeleton-${i}`} />
+                                                            ))}
+                                                        </>
+                                                    )}
+
+                          {!loading && broadcasts.length > 0 && (
+                            broadcasts.map(b => (
+                              <BroadcastHistoryItem 
+                                key={b.id} 
+                                broadcast={b} 
+                                currentUserId={user?.id}
+                                onDelete={handleDeleteBroadcast}
+                              />
+                            ))
+                          )}                                                    {!loading && broadcasts.length === 0 && (
+                                                        <div className="text-center py-20 text-slate-500 dark:text-slate-400">
+                                                            <p>No past broadcasts.</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                    </Card>
+                </div>
+            </div>
+
+            {/* --- PREVIEW MODAL --- */}
+            <Modal isOpen={isPreviewOpen} onClose={() => setIsPreviewOpen(false)} title="Broadcast Preview">
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">This is how your broadcast will appear in the main feed.</p>
+                {user && (
+                    <BroadcastCard
+                        broadcast={{
+                            id: 'preview-id',
+                            title: title,
+                            content: content,
+                            author: user,
+                            target: target,
+                            timestamp: new Date().toISOString(),
+                        }}
+                        isPinned={true}
+                    />
+                )}
+                 <div className="flex justify-end mt-4">
+                    <Button variant="secondary" onClick={() => setIsPreviewOpen(false)}>Close Preview</Button>
+                </div>
+            </Modal>
+        </div>
+        </div>
+    );
+};
